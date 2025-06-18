@@ -1,6 +1,6 @@
 package com.avispl.symphony.dal.avdevices.power.surgex.defenderseries;
 
-import java.nio.file.FileSystemNotFoundException;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -15,6 +15,7 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import javax.security.auth.login.FailedLoginException;
 import org.apache.commons.collections.CollectionUtils;
@@ -72,9 +73,18 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 	 */
 	private final ReentrantLock reentrantLock;
 	/**
-	 * Holds the application configuration properties loaded from the {@code application.properties} file.
+	 * Holds the application configuration properties loaded from the {@code version.properties} file.
 	 */
-	private final Properties applicationProperties;
+	private final Properties versionProperties;
+	/**
+	 * Device adapter instantiation timestamp.
+	 */
+	private final Long adapterInitializationTimestamp;
+	/**
+	 * A dummy {@link AdvancedControllableProperty} that is added when the list of {@link ControllableProperty} is empty.
+	 * This ensures the system has at least one controllable property to handle.
+	 */
+	private final AdvancedControllableProperty dummyControllableProperty;
 
 	/**
 	 * Store of extended statistics object.
@@ -88,6 +98,14 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 	 * Represents the network settings of the adapter.
 	 */
 	private NetworkSetting networkSetting;
+	/**
+	 * The outlets from {@link CurrentStatus}
+	 */
+	private List<Outlet> outlets;
+	/**
+	 * The outlet groups from {@link CurrentStatus}
+	 */
+	private List<Group> groups;
 
 	/**
 	 * Store of historical properties
@@ -96,16 +114,21 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 
 	public SurgeXDefenderCommunicator() {
 		this.reentrantLock = new ReentrantLock();
-		this.applicationProperties = new Properties();
+		this.versionProperties = new Properties();
+		this.adapterInitializationTimestamp = System.currentTimeMillis();
+		this.dummyControllableProperty = new AdvancedControllableProperty(null, null, new AdvancedControllableProperty.Button(), null);
 
 		this.localExtendedStatistics = new ExtendedStatistics();
 		this.currentStatus = new CurrentStatus();
 		this.networkSetting = new NetworkSetting();
+		this.outlets = new ArrayList<>();
+		this.groups = new ArrayList<>();
 
 		this.historicalProperties = new HashSet<>();
 
 		this.setTrustAllCertificates(true);
-		this.loadProperties(this.applicationProperties);
+		this.loadProperties(this.versionProperties);
+		this.logger.info(Constant.INITIALIZED_SUCCESSFULLY_INFO);
 	}
 
 	/**
@@ -118,21 +141,35 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 	}
 
 	/**
-	 * Sets {@link #historicalProperties} value
+	 * Sets historical properties from a comma-separated string.
+	 * Clears existing set before updating.
 	 *
-	 * @param historicalProperties new value of {@link #historicalProperties}
+	 * @param historicalProperties comma-separated property names
 	 */
 	public void setHistoricalProperties(String historicalProperties) {
 		this.historicalProperties.clear();
-		Arrays.asList(historicalProperties.split(Constant.COMMA)).forEach(propertyName -> this.historicalProperties.add(propertyName.trim()));
+		if (StringUtils.isNullOrEmpty(historicalProperties)) {
+			this.logger.warn(Constant.HISTORICAL_PROPS_EMPTY_WARNING);
+			return;
+		}
+		Arrays.stream(historicalProperties.split(Constant.COMMA)).map(String::trim)
+				.filter(historicalProperty -> !historicalProperty.isEmpty())
+				.forEach(historicalProperty -> {
+					if (!SUPPORTED_HISTORICAL_PROPS.contains(historicalProperty)) {
+						this.logger.warn(Constant.UNDEFINED_HISTORICAL_PROP_WARNING + historicalProperty);
+						return;
+					}
+					this.historicalProperties.add(historicalProperty);
+				});
 	}
 
 	@Override
 	public List<Statistics> getMultipleStatistics() throws Exception {
 		this.reentrantLock.lock();
 		try {
-			this.authenticate();
-			this.setupData();
+			if (!this.isDataSetup()) {
+				return Collections.emptyList();
+			}
 			Map<String, String> statistics = new HashMap<>(this.getGeneralProperties());
 			statistics.putAll(this.getAdapterMetadataProperties());
 			statistics.putAll(this.getNetworkSettingProperties());
@@ -141,6 +178,7 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 
 			List<AdvancedControllableProperty> controllableProperties = new ArrayList<>(this.getOutletControllers());
 			controllableProperties.addAll(this.getOutletGroupControllers());
+			Optional.of(controllableProperties).filter(List::isEmpty).ifPresent(l -> l.add(this.dummyControllableProperty));
 
 			ExtendedStatistics extendedStatistics = new ExtendedStatistics();
 			extendedStatistics.setControllableProperties(controllableProperties);
@@ -166,21 +204,35 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 			String groupName = groupInfo[0];
 			String action = propertyInfo[1];
 			int componentIndex = Integer.parseInt(groupInfo[groupInfo.length - 1]) - 1;
+			this.logger.info(String.format("Start control to %s", controllableProperty.getProperty()));
 			switch (groupName) {
 				case Constant.OUTLET_GROUP: {
-					Outlet outlet = Util.getOutlets(this.currentStatus).get(componentIndex);
-					this.performData(Util.getControlEndpoint(action, outlet.getState()), outlet.getId());
+					if (componentIndex < 0 || componentIndex >= this.outlets.size()) {
+						throw new IndexOutOfBoundsException(Constant.DEFINE_OUTLET_INDEX_FAILED + componentIndex);
+					}
+					Outlet outlet = this.outlets.get(componentIndex);
+					if (Util.isRebootingComponent(outlet.getState())) {
+						return;
+					}
+					this.performControlOperation(Util.getControlEndpoint(action, outlet.getState()), outlet.getId());
 					return;
 				}
 				case Constant.GROUP_OUTLET_GROUP: {
-					Group group = Util.getOutletGroups(this.currentStatus).get(componentIndex);
-					this.performData(Util.getControlEndpoint(action, group.getState()), group.getId());
+					if (componentIndex < 0 || componentIndex >= this.groups.size()) {
+						throw new IndexOutOfBoundsException(Constant.DEFINE_OUTLET_GROUP_INDEX_FAILED + componentIndex);
+					}
+					Group group = this.groups.get(componentIndex);
+					if (Util.isRebootingComponent(group.getState())) {
+						return;
+					}
+					this.performControlOperation(Util.getControlEndpoint(action, group.getState()), group.getId());
 					return;
 				}
 				default:
-					throw new InvalidArgumentException(Constant.CONTROL_PROPERTY_FAILED + controllableProperty.getProperty());
+					this.logger.warn(Constant.CONTROL_PROPERTY_FAILED + controllableProperty.getProperty());
 			}
 		} finally {
+			this.logger.info("End control " + controllableProperty.getProperty());
 			this.reentrantLock.unlock();
 		}
 	}
@@ -188,15 +240,16 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 	@Override
 	public void controlProperties(List<ControllableProperty> controllableProperties) throws Exception {
 		if (CollectionUtils.isEmpty(controllableProperties)) {
-			throw new IllegalArgumentException("ControllableProperties can not be null or empty");
+			this.logger.warn(Constant.CONTROLLABLE_PROPS_EMPTY_WARNING);
+			return;
 		}
-		for (ControllableProperty p : controllableProperties) {
+		controllableProperties.forEach(controllableProperty -> {
 			try {
-				this.controlProperty(p);
+				this.controlProperty(controllableProperty);
 			} catch (Exception e) {
-				logger.error(String.format("Error when control property %s", p.getProperty()), e);
+				this.logger.error(Constant.CONTROL_PROPERTY_FAILED + controllableProperty.getProperty(), e);
 			}
-		}
+		});
 	}
 
 	@Override
@@ -208,40 +261,64 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 
 	@Override
 	protected void internalDestroy() {
+		this.logger.info(Constant.DESTROY_INTERNAL_INFO + this);
 		this.currentStatus = null;
 		this.networkSetting = null;
+		this.outlets = null;
+		this.groups = null;
 		this.localExtendedStatistics = null;
 		this.historicalProperties = null;
 		super.internalDestroy();
 	}
 
 	/**
-	 * Loads properties from the {@code application.properties} file into the provided {@link Properties} object.
+	 * Load properties from the {@code version.properties} file into the provided {@link Properties} object.
+	 * <p>
+	 * If the file is not found or an error occurs during reading, the method logs the error but does not throw an exception.
 	 *
-	 * @param properties The {@link Properties} object to load the configuration into.
-	 * @throws ResourceNotReachableException if the properties file cannot be loaded.
+	 * @param properties The {@link Properties} object to populate with configuration values.
 	 */
 	private void loadProperties(Properties properties) {
 		try {
-			properties.load(getClass().getResourceAsStream("/application.properties"));
-		} catch (Exception e) {
-			throw new FileSystemNotFoundException(Constant.READ_PROPERTIES_FILE_FAILED);
+			properties.load(getClass().getResourceAsStream("/version.properties"));
+			properties.setProperty("adapter.uptime", String.valueOf(this.adapterInitializationTimestamp));
+		} catch (IOException e) {
+			this.logger.error(Constant.READ_PROPERTIES_FILE_FAILED + e.getMessage());
 		}
 	}
 
 	/**
-	 * Initializes device data by fetching the currentStatus and networkSettings.
+	 * Authenticates and attempts to fetch the device's current status and network settings.
+	 * Also extracts and sets the time zone info into the current status.
 	 *
-	 * @throws FailedLoginException If the login fails during data fetching.
+	 * @return {@code true} if data is successfully fetched and initialized; {@code false} otherwise.
+	 * @throws FailedLoginException if authentication fails.
 	 */
-	private void setupData() throws FailedLoginException {
-		this.currentStatus = this.fetchData(EndpointConstant.CURRENT_STATUS, CurrentStatus.class);
-		this.networkSetting = this.fetchData(EndpointConstant.NETWORK_SETTINGS, NetworkSetting.class);
+	private boolean isDataSetup() throws FailedLoginException {
+		try {
+			this.authenticate();
+			this.currentStatus = this.fetchData(EndpointConstant.CURRENT_STATUS, CurrentStatus.class);
+			this.networkSetting = this.fetchData(EndpointConstant.NETWORK_SETTINGS, NetworkSetting.class);
 
-		String timeZone = Optional.ofNullable(this.networkSetting)
-				.map(NetworkSetting::getNtp).map(Ntp::getTimeZoneInfo).map(TimeZoneInfo::getName)
-				.orElse(null);
-		this.currentStatus.setTimeZone(timeZone);
+			this.currentStatus.setTimeZone(Optional.ofNullable(this.networkSetting)
+					.map(NetworkSetting::getNtp).map(Ntp::getTimeZoneInfo).map(TimeZoneInfo::getName)
+					.orElse(null));
+			this.outlets = Optional.ofNullable(currentStatus)
+					.map(CurrentStatus::getDevices).filter(devices -> !devices.isEmpty())
+					.map(devices -> devices.get(0).getOutlets()).filter(outletList -> !outletList.isEmpty())
+					.orElse(new ArrayList<>());
+			this.groups = Optional.ofNullable(currentStatus)
+					.map(CurrentStatus::getDevices).filter(devices -> !devices.isEmpty())
+					.map(devices -> devices.get(0).getGroups()).filter(groupList -> !groupList.isEmpty())
+					.orElse(new ArrayList<>());
+
+			return true;
+		} catch (FailedLoginException e) {
+			throw e;
+		} catch (Exception e) {
+			this.logger.error(e.getMessage(), e);
+			return false;
+		}
 	}
 
 	/**
@@ -252,6 +329,7 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 	 */
 	private Map<String, String> getGeneralProperties() {
 		if (Objects.isNull(this.currentStatus)) {
+			this.logger.warn(Constant.CURRENT_STATUS_NULL_WARNING);
 			return Collections.emptyMap();
 		}
 		return this.generateProperties(
@@ -267,13 +345,11 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 	 * @return A map of Adapter metadata properties with the property names as keys and their corresponding mapped values as values.
 	 */
 	private Map<String, String> getAdapterMetadataProperties() {
-		Map<String, String> properties = new HashMap<>();
-		Arrays.stream(AdapterMetadataProperty.values()).forEach(property -> {
-			String propertyName = String.format(Constant.PROPERTY_FORMAT, Constant.ADAPTER_METADATA_GROUP, property.getName());
-			properties.put(propertyName, Util.mapToAdapterMetadataProperty(property, this.applicationProperties));
-		});
-
-		return properties;
+		return this.generateProperties(
+				AdapterMetadataProperty.values(),
+				Constant.ADAPTER_METADATA_GROUP,
+				property -> Util.mapToAdapterMetadataProperty(this.versionProperties, property)
+		);
 	}
 
 	/**
@@ -284,6 +360,7 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 	 */
 	private Map<String, String> getNetworkSettingProperties() {
 		if (Objects.isNull(this.networkSetting)) {
+			this.logger.warn(Constant.NETWORK_STATUS_NULL_WARNING);
 			return Collections.emptyMap();
 		}
 		return this.generateProperties(
@@ -300,13 +377,13 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 	 * or an empty map if no outlets are found.
 	 */
 	private Map<String, String> getOutletProperties() {
-		List<Outlet> deviceOutlets = Util.getOutlets(this.currentStatus);
-		if (CollectionUtils.isEmpty(deviceOutlets)) {
+		if (CollectionUtils.isEmpty(this.outlets)) {
+			this.logger.warn(Constant.OUTLETS_EMPTY_WARNING);
 			return Collections.emptyMap();
 		}
 		Map<String, String> properties = new HashMap<>();
-		for (int i = 0; i < deviceOutlets.size(); i++) {
-			Outlet outlet = deviceOutlets.get(i);
+		for (int i = 0; i < this.outlets.size(); i++) {
+			Outlet outlet = this.outlets.get(i);
 			properties.putAll(this.generateProperties(
 					OutletProperty.values(),
 					String.format(Constant.GROUP_FORMAT, Constant.OUTLET_GROUP, i + 1),
@@ -324,13 +401,13 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 	 * or an empty map if no outlet groups are found.
 	 */
 	private Map<String, String> getOutletGroupProperties() {
-		List<Group> deviceOutletGroups = Util.getOutletGroups(this.currentStatus);
-		if (CollectionUtils.isEmpty(deviceOutletGroups)) {
+		if (CollectionUtils.isEmpty(this.groups)) {
+			this.logger.warn(Constant.OUTLET_GROUPS_EMPTY_WARNING);
 			return Collections.emptyMap();
 		}
 		Map<String, String> properties = new HashMap<>();
-		for (int i = 0; i < deviceOutletGroups.size(); i++) {
-			Group group = deviceOutletGroups.get(i);
+		for (int i = 0; i < this.groups.size(); i++) {
+			Group group = this.groups.get(i);
 			properties.putAll(this.generateProperties(
 					OutletGroupProperty.values(),
 					String.format(Constant.GROUP_FORMAT, Constant.GROUP_OUTLET_GROUP, i + 1),
@@ -348,34 +425,35 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 	 * or an empty list if no outlets are found.
 	 */
 	private List<AdvancedControllableProperty> getOutletControllers() {
-		List<Outlet> deviceOutlets = Util.getOutlets(this.currentStatus);
-		if (CollectionUtils.isEmpty(deviceOutlets)) {
+		if (CollectionUtils.isEmpty(this.outlets)) {
+			this.logger.warn(Constant.OUTLETS_EMPTY_WARNING);
 			return Collections.emptyList();
 		}
 		List<AdvancedControllableProperty> properties = new ArrayList<>();
-		for (int i = 0; i < deviceOutlets.size(); i++) {
-			Outlet outlet = deviceOutlets.get(i);
+		this.outlets.forEach(outlet -> {
 			if (Util.isRebootingComponent(outlet.getState())) {
-				continue;
+				this.logger.info(String.format(Constant.OUTLET_REBOOTING_INFO, outlet.getId()));
+				return;
 			}
-			String buttonName = String.format(Constant.GROUP_FORMAT, Constant.OUTLET_GROUP, i + 1);
+			int index = this.outlets.indexOf(outlet);
+			String controlName = String.format(Constant.GROUP_FORMAT, Constant.OUTLET_GROUP, index + 1);
 			InitialState initialState = InitialState.getByValue(outlet.getInitialState());
 			if (initialState.equals(InitialState.UNDEFINED)) {
 				this.logger.warn(Constant.INITIAL_STATE_UNDEFINED_WARNING + outlet.getInitialState());
 			}
 			if (!InitialState.NOT_TOGGLE_STATES.contains(initialState)) {
 				properties.add(this.generateControllableSwitch(
-						String.format(Constant.PROPERTY_FORMAT, buttonName, OutletProperty.TOGGLE.getName()),
+						String.format(Constant.PROPERTY_FORMAT, controlName, OutletProperty.POWER.getName()),
 						Constant.ON, Constant.OFF, Util.mapToToggle(outlet.getState())
 				));
 			}
 			if (!InitialState.NOT_REBOOT_STATES.contains(initialState)) {
 				properties.add(this.generateControllableButton(
-						String.format(Constant.PROPERTY_FORMAT, buttonName, OutletProperty.REBOOT.getName()),
+						String.format(Constant.PROPERTY_FORMAT, controlName, OutletProperty.REBOOT.getName()),
 						Constant.REBOOT, Constant.REBOOTING, 0L
 				));
 			}
-		}
+		});
 		return properties;
 	}
 
@@ -386,26 +464,27 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 	 * or an empty list if no outlet groups are found.
 	 */
 	private List<AdvancedControllableProperty> getOutletGroupControllers() {
-		List<Group> deviceOutletGroups = Util.getOutletGroups(this.currentStatus);
-		if (CollectionUtils.isEmpty(deviceOutletGroups)) {
+		if (CollectionUtils.isEmpty(this.groups)) {
+			this.logger.warn(Constant.OUTLET_GROUPS_EMPTY_WARNING);
 			return Collections.emptyList();
 		}
 		List<AdvancedControllableProperty> properties = new ArrayList<>();
-		for (int i = 0; i < deviceOutletGroups.size(); i++) {
-			Group group = deviceOutletGroups.get(i);
+		this.groups.forEach(group -> {
 			if (Util.isRebootingComponent(group.getState())) {
-				continue;
+				this.logger.info(String.format(Constant.OUTLET_GROUP_REBOOTING_INFO, group.getId()));
+				return;
 			}
-			String buttonName = String.format(Constant.GROUP_FORMAT, Constant.GROUP_OUTLET_GROUP, i + 1);
+			int index = this.groups.indexOf(group);
+			String controlName = String.format(Constant.GROUP_FORMAT, Constant.GROUP_OUTLET_GROUP, index + 1);
 			properties.add(this.generateControllableSwitch(
-					String.format(Constant.PROPERTY_FORMAT, buttonName, OutletGroupProperty.TOGGLE.getName()),
+					String.format(Constant.PROPERTY_FORMAT, controlName, OutletGroupProperty.POWER.getName()),
 					Constant.ON, Constant.OFF, Util.mapToToggle(group.getState())
 			));
 			properties.add(this.generateControllableButton(
-					String.format(Constant.PROPERTY_FORMAT, buttonName, OutletGroupProperty.REBOOT.getName()),
+					String.format(Constant.PROPERTY_FORMAT, controlName, OutletGroupProperty.REBOOT.getName()),
 					Constant.REBOOT, Constant.REBOOTING, 0L
 			));
-		}
+		});
 		return properties;
 	}
 
@@ -417,11 +496,19 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 	 * or an empty map if the current status, historical properties, or input map is null/empty.
 	 */
 	private Map<String, String> getDynamicStatistics(Map<String, String> statistics) {
-		if (this.currentStatus == null
-				|| CollectionUtils.isEmpty(this.historicalProperties)
-				|| MapUtils.isEmpty(statistics)) {
+		if (this.currentStatus == null) {
+			this.logger.warn(Constant.CURRENT_STATUS_NULL_WARNING);
 			return Collections.emptyMap();
 		}
+		if (CollectionUtils.isEmpty(this.historicalProperties)) {
+			this.logger.warn(Constant.HISTORICAL_PROPS_EMPTY_WARNING);
+			return Collections.emptyMap();
+		}
+		if (MapUtils.isEmpty(statistics)) {
+			this.logger.warn(Constant.STATISTICS_EMPTY_WARNING);
+			return Collections.emptyMap();
+		}
+
 		Map<String, String> dynamicStatistics = new HashMap<>();
 		this.historicalProperties.forEach(property -> {
 			String value = statistics.get(property);
@@ -434,22 +521,27 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 	}
 
 	/**
-	 * Generates a map of properties with optional grouping and custom mapping logic.
+	 * Generates a map of property names and their corresponding values.
+	 * <p>
+	 * Each property name can be optionally prefixed with a group name using a predefined format.
+	 * The values are derived using the provided mapping function, with {@link Constant#NONE} as a fallback for null results.
+	 * </p>
 	 *
-	 * @param <T> The enum type that extends {@link BaseProperty}.
-	 * @param properties An array of enum constants representing the properties.
-	 * @param groupName An optional group name to prefix property names. Can be null.
-	 * @param mapper A function to map each property to its corresponding value.
-	 * @return A map of property names and their values, with "None" for null values.
+	 * @param <T>        the enum type that extends {@link BaseProperty}
+	 * @param properties the array of enum constants to be processed; if null, an empty map is returned
+	 * @param groupName  optional group name used to prefix each property's name; can be null
+	 * @param mapper     a function that maps each property to its corresponding string value;
+	 *                   if null or if the result is null, {@link Constant#NONE} is used as the value
+	 * @return a map where keys are (optionally grouped) property names and values are mapped strings or {@link Constant#NONE}
 	 */
 	private <T extends Enum<T> & BaseProperty> Map<String, String> generateProperties(T[] properties, String groupName, Function<T, String> mapper) {
-		Map<String, String> result = new HashMap<>();
-		Arrays.stream(properties).forEach(property -> result.put(
-				Objects.isNull(groupName) ? property.getName() : String.format(Constant.PROPERTY_FORMAT, groupName, property.getName()),
-				Optional.ofNullable(mapper.apply(property)).orElse(Constant.NONE))
-		);
-
-		return result;
+		if (properties == null || mapper == null) {
+			return Collections.emptyMap();
+		}
+		return Arrays.stream(properties).collect(Collectors.toMap(
+				property -> Objects.isNull(groupName) ? property.getName() : String.format(Constant.PROPERTY_FORMAT, groupName, property.getName()),
+				property -> Optional.ofNullable(mapper.apply(property)).orElse(Constant.NONE)
+		));
 	}
 
 	/**
@@ -499,31 +591,38 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 	 */
 	private <T> T fetchData(String endpoint, Class<T> responseClass) throws FailedLoginException {
 		try {
-			return this.doGet(endpoint, responseClass);
+			T response = this.doGet(endpoint, responseClass);
+			if (Objects.isNull(response)) {
+				this.logger.warn(String.format(Constant.FETCHED_DATA_NULL_WARNING, endpoint, responseClass.getSimpleName()));
+			}
+
+			return response;
 		} catch (FailedLoginException e) {
 			throw new FailedLoginException(Constant.LOGIN_FAILED);
 		} catch (Exception e) {
-			throw new ResourceNotReachableException(Constant.SET_UP_DATA_FAILED + responseClass.getSimpleName(), e);
+			this.logger.error(String.format(Constant.FETCH_DATA_FAILED, endpoint, responseClass.getSimpleName()), e);
+			throw new ResourceNotReachableException(Constant.SET_UP_DATA_FAILED + responseClass.getSimpleName());
 		}
 	}
 
 	/**
-	 * Sends a POST request to control a device component based on the given URI and component ID.
+	 * Sends a POST request to control a component based on the given URI and component ID.
 	 *
 	 * @param uri The URI template for the action endpoint, which may contain placeholders.
-	 * @param componentID The ID of the device component to be controlled.
+	 * @param componentID The ID of the component to be controlled.
 	 * @throws NotImplementedException If the request fails or the server returns a negative response.
 	 */
-	private void performData(String uri, String componentID) {
+	private void performControlOperation(String uri, String componentID) {
 		try {
 			String apiURI = uri.replace(EndpointConstant.DEVICE_ID_AND_COMPONENT_ID, componentID).replace("//", Constant.SLASH);
 			Boolean response = this.doPost(apiURI, null, Boolean.class);
 			if (response.equals(Boolean.FALSE)) {
-				throw new NotImplementedException(Constant.RESPONSE_FAILED + apiURI);
+				throw new NotImplementedException(Constant.RESPONSE_CONTROL_FAILED + apiURI);
 			}
 		} catch (Exception e) {
 			String[] parts = uri.split(Constant.SLASH);
-			throw new NotImplementedException(Constant.ACTION_PERFORM_FAILED + parts[parts.length - 1], e);
+			this.logger.error(String.format("Exception occurred during control operation. Endpoint: %s, ComponentID: %s", uri, componentID), e);
+			throw new NotImplementedException(Constant.ACTION_PERFORM_FAILED + parts[parts.length - 1]);
 		}
 	}
 }

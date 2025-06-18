@@ -14,7 +14,6 @@ import com.avispl.symphony.dal.avdevices.power.surgex.defenderseries.bases.BaseP
  */
 public enum GeneralProperty implements BaseProperty {
 	FIRMWARE_VERSION("FirmwareVersion"),
-	HARDWARE_VERSION("HardwareVersion"),
 	MODEL_NUMBER("ModelNumber"),
 	MAC_ADDRESS("MACAddress"),
 	DEVICE_TIME("DeviceTime"),

@@ -11,6 +11,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import com.avispl.symphony.api.dal.dto.control.AdvancedControllableProperty;
+import com.avispl.symphony.api.dal.dto.control.ControllableProperty;
 import com.avispl.symphony.api.dal.dto.monitor.ExtendedStatistics;
 import com.avispl.symphony.dal.avdevices.power.surgex.defenderseries.common.constants.Constant;
 
@@ -60,9 +61,26 @@ class SurgeXDefenderCommunicatorTest {
 		dynamicStatistics.forEach(Assertions::assertNotNull);
 	}
 
+	@Test
+	void testControlOutletGroupReboot() throws Exception {
+		this.extendedStatistics = (ExtendedStatistics) this.surgeXDefenderCommunicator.getMultipleStatistics().get(0);
+		String groupName = "OutletGroup_01";
+		String controlProperty = groupName + "#Reboot";
+		ControllableProperty controllableProperty = new ControllableProperty(controlProperty, "1", null);
+		this.surgeXDefenderCommunicator.controlProperty(controllableProperty);
+		this.extendedStatistics = (ExtendedStatistics) this.surgeXDefenderCommunicator.getMultipleStatistics().get(0);
+		Map<String, String> statisticsList = this.extendedStatistics.getStatistics();
+
+		Map<String, String> statisticOutletGroup = this.filterGroupStatistics(statisticsList, groupName);
+		List<AdvancedControllableProperty> controllableProperties = this.extendedStatistics.getControllableProperties().stream()
+				.filter(property -> property.getName().startsWith(groupName)).collect(Collectors.toList());
+		this.verifyStatistics(statisticOutletGroup);
+		Assertions.assertEquals(0, controllableProperties.size());
+	}
+
 	private void verifyStatistics(Map<String, String> statistics) {
 		Map<String, Map<String, String>> groups = new LinkedHashMap<>();
-		groups.put("General", this.filterGroupStatistics(statistics, null));
+		groups.put(Constant.GENERAL_GROUP, this.filterGroupStatistics(statistics, null));
 		groups.put(Constant.ADAPTER_METADATA_GROUP, this.filterGroupStatistics(statistics, Constant.ADAPTER_METADATA_GROUP));
 		groups.put(Constant.NETWORK_GROUP, this.filterGroupStatistics(statistics, Constant.NETWORK_GROUP));
 		groups.put(Constant.OUTLET_GROUP, this.filterGroupStatistics(statistics, Constant.OUTLET_GROUP));

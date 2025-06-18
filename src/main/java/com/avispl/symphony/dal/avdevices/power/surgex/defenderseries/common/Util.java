@@ -1,17 +1,17 @@
 package com.avispl.symphony.dal.avdevices.power.surgex.defenderseries.common;
 
 import java.text.DecimalFormat;
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
 
 import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 
 import com.avispl.symphony.dal.avdevices.power.surgex.defenderseries.common.constants.Constant;
 import com.avispl.symphony.dal.avdevices.power.surgex.defenderseries.common.constants.EndpointConstant;
@@ -38,6 +38,8 @@ import com.avispl.symphony.dal.util.StringUtils;
  * @since 1.0.0
  */
 public class Util {
+	private static final Log LOGGER = LogFactory.getLog(Util.class);
+
 	private Util() {
 		// Prevent instantiation
 	}
@@ -57,8 +59,6 @@ public class Util {
 		switch (property) {
 			case FIRMWARE_VERSION:
 				return mapToValue(currentStatus.getFirmware());
-			case HARDWARE_VERSION:
-				return Constant.HARDWARE_VERSION;
 			case MODEL_NUMBER:
 				return mapToValue(currentStatus.getModel());
 			case MAC_ADDRESS:
@@ -74,9 +74,9 @@ public class Util {
 			case POWER:
 				return mapToValue(getMeasurements(currentStatus.getDevices()).getPower());
 			case SURGE_PROTECTION_STATUS:
-				return mapToValue(getMeasurements(currentStatus.getDevices()).isSurgeGood(), Constant.OK, Constant.FAULT);
+				return mapToValue(getMeasurements(currentStatus.getDevices()).isSurgeGood(), Constant.OK, Constant.ALERT);
 			case VOLTAGE_LEVEL_STATUS:
-				return mapToValue(getMeasurements(currentStatus.getDevices()).isVoltageInLimit(), Constant.OK, Constant.OUT_OF_RANGE);
+				return mapToValue(getMeasurements(currentStatus.getDevices()).isVoltageInLimit(), Constant.OK, Constant.ALERT);
 			default:
 				return null;
 		}
@@ -85,23 +85,24 @@ public class Util {
 	/**
 	 * Maps the given {@link AdapterMetadataProperty} to its value using the provided properties.
 	 *
-	 * @param property the property to map
 	 * @param applicationProperties the source of property values
+	 * @param property the property to map
 	 * @return the formatted value, or {@code Constant.NONE} if not available
 	 */
-	public static String mapToAdapterMetadataProperty(AdapterMetadataProperty property, Properties applicationProperties) {
+	public static String mapToAdapterMetadataProperty(Properties applicationProperties, AdapterMetadataProperty property) {
 		String adapterBuildDate = applicationProperties.getProperty("adapter.build.date");
+		String adapterUptime = applicationProperties.getProperty("adapter.uptime");
 		String adapterVersion = applicationProperties.getProperty("adapter.version");
 
 		switch (property) {
 			case ADAPTER_BUILD_DATE:
-				return adapterBuildDate == null ? Constant.NONE : adapterBuildDate;
+				return mapToValue(adapterBuildDate);
 			case ADAPTER_UPTIME:
-				return adapterBuildDate == null ? Constant.NONE : formatElapsedTime(adapterBuildDate);
+				return mapToUptime(adapterUptime);
 			case ADAPTER_VERSION:
-				return adapterVersion == null ? Constant.NONE : adapterVersion;
+				return mapToValue(adapterVersion);
 			default:
-				return Constant.NONE;
+				return null;
 		}
 	}
 
@@ -154,7 +155,7 @@ public class Util {
 				return InitialState.getByValue(outlet.getInitialState()).getName();
 			case REBOOT_DELAY:
 				return mapToValue(outlet.getRebootTime());
-			case TOGGLE:
+			case POWER:
 				if (isRebootingComponent(outlet.getState())) {
 					return Constant.OFF;
 				}
@@ -190,39 +191,13 @@ public class Util {
 				return mapToValue(group.getName());
 			case STATUS:
 				return mapToStatus(group.getState());
-			case TOGGLE:
+			case POWER:
 				return isRebootingComponent(group.getState()) ? Constant.OFF : mapToToggle(group.getState());
 			case REBOOT:
 				return isRebootingComponent(group.getState()) ? Constant.REBOOT : Constant.NOT_AVAILABLE;
 			default:
 				return null;
 		}
-	}
-
-	/**
-	 * Retrieves the list of outlets from the {@link CurrentStatus}.
-	 *
-	 * @param currentStatus the current status
-	 * @return the list of outlets, or an empty list if unavailable
-	 */
-	public static List<Outlet> getOutlets(CurrentStatus currentStatus) {
-		return Optional.ofNullable(currentStatus)
-				.map(CurrentStatus::getDevices).filter(devices -> !devices.isEmpty())
-				.map(devices -> devices.get(0).getOutlets()).filter(outlets -> !outlets.isEmpty())
-				.orElse(new ArrayList<>());
-	}
-
-	/**
-	 * Retrieves the list of outlet groups from the {@link CurrentStatus}.
-	 *
-	 * @param currentStatus the current status
-	 * @return the list of outlet groups, or an empty list if unavailable
-	 */
-	public static List<Group> getOutletGroups(CurrentStatus currentStatus) {
-		return Optional.ofNullable(currentStatus)
-				.map(CurrentStatus::getDevices).filter(devices -> !devices.isEmpty())
-				.map(devices -> devices.get(0).getGroups()).filter(group -> !group.isEmpty())
-				.orElse(new ArrayList<>());
 	}
 
 	/**
@@ -252,14 +227,14 @@ public class Util {
 	/**
 	 * Returns the control endpoint based on the given action and current state.
 	 * <p>
-	 * Supports {@link Constant#TOGGLE} and {@link Constant#REBOOT} actions.
+	 * Supports {@link Constant#POWER} and {@link Constant#REBOOT} actions.
 	 *
 	 * @param action the control action (e.g., toggle or reboot)
 	 * @param state the current state (1 for ON, others for OFF)
 	 * @return the corresponding endpoint, or {@code null} if the action is unsupported
 	 */
 	public static String getControlEndpoint(String action, int state) {
-		if (action.equals(Constant.TOGGLE)) {
+		if (action.equals(Constant.POWER)) {
 			return state == 1 ? EndpointConstant.POWER_OFF : EndpointConstant.POWER_ON;
 		}
 		if (action.equals(Constant.REBOOT)) {
@@ -286,28 +261,45 @@ public class Util {
 	}
 
 	/**
-	 * Maps the first element of a list to its string representation, or returns null if empty.
+	 * Returns the string representation of the first element in the list, or {@code null} if the list is null or empty.
+	 *
+	 * @param values the list of values
+	 * @param <T>    the type of list elements
+	 * @return string representation of the first element, or {@code null} if empty
 	 */
 	private static <T> String mapToValue(List<T> values) {
 		return CollectionUtils.isNotEmpty(values) ? String.valueOf(values.get(0)) : null;
 	}
 
 	/**
-	 * Maps a Double to its rounded string value, or null if null.
+	 * Returns the rounded string representation of a {@link Double},
+	 formatted with at most one decimal place, or {@code null} if input is null.
+	 *
+	 * @param value the double value
+	 * @return formatted string or {@code null} if input is null
 	 */
 	private static String mapToValue(Double value) {
 		return value != null ? new DecimalFormat("0.#").format(value) : null;
 	}
 
 	/**
-	 * Maps an Integer to its string representation, or null if null.
+	 * Returns the string representation of an {@link Integer}, or {@code null} if input is null.
+	 *
+	 * @param value the integer value
+	 * @return string representation or {@code null} if input is null
 	 */
 	private static String mapToValue(Integer value) {
 		return value != null ? String.valueOf(value) : null;
 	}
 
 	/**
-	 * Maps a Boolean to a string based on true/false values provided.
+	 * Maps a {@link Boolean} to its corresponding string value.
+	 * Returns {@code trueValue} if {@code true}, {@code falseValue} if {@code false}, or {@code null} if input is null.
+	 *
+	 * @param value      the boolean value
+	 * @param trueValue  string to return if value is {@code true}
+	 * @param falseValue string to return if value is {@code false}
+	 * @return mapped string or {@code null} if input is null
 	 */
 	private static String mapToValue(Boolean value, String trueValue, String falseValue) {
 		if (value == null) {
@@ -318,7 +310,12 @@ public class Util {
 	}
 
 	/**
-	 * Converts an integer state to toggle string ("1" or "0"), or null if invalid.
+	 * Converts an integer value to a toggle string representation.
+	 * Returns "1" if value is 1, "0" otherwise (including all other integers).
+	 * Returns {@code null} if input is null.
+	 *
+	 * @param value the integer toggle value
+	 * @return "1", "0", or {@code null} if input is null
 	 */
 	public static String mapToToggle(Integer value) {
 		if (value == null) {
@@ -329,23 +326,42 @@ public class Util {
 	}
 
 	/**
-	 * Converts a timestamp string to a formatted 12-hour local datetime string.
+	 * Converts a timestamp string to a formatted to {@link Constant#DATETIME_12H_FORMAT}
+	 * based on the given time zone. If the time zone is invalid or empty,
+	 * the system default time zone is used.
+	 *
+	 * @param timestamp the ISO-8601 timestamp string (e.g., "2024-06-05T14:30:00Z")
+	 * @param timeZone  the IANA time zone ID (e.g., "Asia/Ho_Chi_Minh"), or null/empty for system default
+	 * @return formatted to {@link Constant#DATETIME_12H_FORMAT}, or {@code null} if timestamp is null/empty
 	 */
 	private static String mapTo12hDatetime(String timestamp, String timeZone) {
-		if (StringUtils.isNullOrEmpty(timestamp)) {
+		try {
+			if (StringUtils.isNullOrEmpty(timestamp)) {
+				return null;
+			}
+
+			ZoneId zoneId = StringUtils.isNullOrEmpty(timeZone) || !ZoneId.getAvailableZoneIds().contains(timeZone) ? ZoneId.systemDefault() : ZoneId.of(timeZone);
+			ZonedDateTime zdt = ZonedDateTime.parse(timestamp).toInstant().atZone(zoneId);
+			LocalDateTime localDateTime = zdt.toLocalDateTime();
+			DateTimeFormatter formatter = DateTimeFormatter.ofPattern(Constant.DATETIME_12H_FORMAT);
+
+			return localDateTime.format(formatter);
+		} catch (Exception e) {
+			LOGGER.error(String.format(Constant.MAP_12_DATE_TIME_FAILED, timestamp, timestamp), e);
 			return null;
 		}
-
-		ZoneId zoneId = StringUtils.isNullOrEmpty(timeZone) || !ZoneId.getAvailableZoneIds().contains(timeZone) ? ZoneId.systemDefault() : ZoneId.of(timeZone);
-		ZonedDateTime zdt = ZonedDateTime.parse(timestamp).toInstant().atZone(zoneId);
-		LocalDateTime localDateTime = zdt.toLocalDateTime();
-		DateTimeFormatter formatter = DateTimeFormatter.ofPattern(Constant.DATETIME_12H_FORMAT);
-
-		return localDateTime.format(formatter);
 	}
 
 	/**
-	 * Maps an {@link Outlet}/{@link Group} state integer to a human-readable status string.
+	 * Converts the integer state of an {@link Outlet} or {@link Group} to a readable status string.
+	 * <ul>
+	 *   <li>0 → {@link Constant#OFF}</li>
+	 *   <li>1 → {@link Constant#ON}</li>
+	 *   <li>2 → {@link Constant#REBOOTING}</li>
+	 * </ul>
+	 *
+	 * @param state the integer representing the component state
+	 * @return the corresponding status string, or {@code null} if unknown or null
 	 */
 	private static String mapToStatus(Integer state) {
 		if (state == null) {
@@ -364,31 +380,43 @@ public class Util {
 	}
 
 	/**
-	 * Returns the elapsed time between now and the given date-time string.
+	 * Returns the elapsed uptime between the current system time and the given timestamp in milliseconds.
+	 * <p>
+	 * The input timestamp represents the start time in milliseconds (typically from {@link System#currentTimeMillis()}).
+	 * The returned string represents the absolute duration in the format:
+	 * "X day(s) Y hour(s) Z minute(s) W second(s)", omitting any zero-value units except seconds.
 	 *
-	 * @param adapterBuildDate the date-time in format "yyyy-MM-dd HH:mm"
-	 * @return formatted string like "X day(s) Y hour(s) Z minute(s) W second(s)"
+	 * @param uptime the start time in milliseconds as a string (e.g., "1717581000000")
+	 * @return a formatted duration string like "2 day(s) 3 hour(s) 15 minute(s) 42 second(s)",
+	 *         or {@link Constant#NONE} if parsing fails
 	 */
-	private static String formatElapsedTime(String adapterBuildDate) {
-		LocalDateTime target = LocalDateTime.parse(adapterBuildDate, DateTimeFormatter.ofPattern(Constant.DATE_TIME_PATTERN));
-		Duration duration = Duration.between(LocalDateTime.now(), target).abs();
-		long totalSeconds = duration.getSeconds();
-		long days = totalSeconds / (24 * 3600);
-		long hours = totalSeconds % (24 * 3600) / 3600;
-		long minutes = totalSeconds % 3600 / 60;
-		long seconds = totalSeconds % 60;
-		StringBuilder rs = new StringBuilder();
-		if (days > 0) {
-			rs.append(days).append(" day(s) ");
-		}
-		if (hours > 0) {
-			rs.append(hours).append(" hour(s) ");
-		}
-		if (minutes > 0) {
-			rs.append(minutes).append(" minute(s) ");
-		}
-		rs.append(seconds).append(" second(s)");
+	private static String mapToUptime(String uptime) {
+		try {
+			if (StringUtils.isNullOrEmpty(uptime)) {
+				return Constant.NONE;
+			}
 
-		return rs.toString().trim();
+			long uptimeSecond = (System.currentTimeMillis() - Long.parseLong(uptime)) / 1000;
+			long seconds = uptimeSecond % 60;
+			long minutes = uptimeSecond % 3600 / 60;
+			long hours = uptimeSecond % 86400 / 3600;
+			long days = uptimeSecond / 86400;
+			StringBuilder rs = new StringBuilder();
+			if (days > 0) {
+				rs.append(days).append(" day(s) ");
+			}
+			if (hours > 0) {
+				rs.append(hours).append(" hour(s) ");
+			}
+			if (minutes > 0) {
+				rs.append(minutes).append(" minute(s) ");
+			}
+			rs.append(seconds).append(" second(s)");
+
+			return rs.toString().trim();
+		} catch (Exception e) {
+			LOGGER.error(Constant.MAP_ELAPSED_TIME_FAILED + uptime, e);
+			return Constant.NONE;
+		}
 	}
 }

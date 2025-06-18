@@ -13,7 +13,7 @@ import com.avispl.symphony.dal.avdevices.power.surgex.defenderseries.common.cons
 public enum OutletGroupProperty implements BaseProperty {
 	NAME("Name"),
 	STATUS("Status"),
-	TOGGLE(Constant.TOGGLE),
+	POWER(Constant.POWER),
 	REBOOT(Constant.REBOOT);
 
 	private final String name;

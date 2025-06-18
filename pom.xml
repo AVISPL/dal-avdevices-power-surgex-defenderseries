@@ -9,7 +9,7 @@
   <version>1.0.0</version>
   <properties>
     <symphonyApiVersion>RELEASE</symphonyApiVersion>
-    <maven.build.timestamp>${maven.build.timestamp}</maven.build.timestamp>
+    <timestamp>${maven.build.timestamp}</timestamp>
     <maven.build.timestamp.format>yyyy-MM-dd HH:mm</maven.build.timestamp.format>
   </properties>
 
@@ -199,11 +199,6 @@
       <artifactId>httpclient</artifactId>
       <version>4.5.13</version>
       <scope>provided</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.openjdk.jol</groupId>
-      <artifactId>jol-core</artifactId>
-      <version>0.16</version>
     </dependency>
     <!-- test dependencies -->
     <dependency>
