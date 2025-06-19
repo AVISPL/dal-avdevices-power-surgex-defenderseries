@@ -1,12 +1,14 @@
 package com.avispl.symphony.dal.avdevices.power.surgex.defenderseries.types.properties;
 
+import com.avispl.symphony.dal.avdevices.power.surgex.defenderseries.bases.BaseProperty;
+
 /**
  * Enum representing different types of Adapter metadata.
  *
  * @author Kevin / Symphony Dev Team<br>
  * @since 1.0.0
  */
-public enum AdapterMetadataProperty {
+public enum AdapterMetadataProperty implements BaseProperty {
 	ADAPTER_BUILD_DATE("AdapterBuildDate"),
 	ADAPTER_UPTIME("AdapterUptime"),
 	ADAPTER_VERSION("AdapterVersion");

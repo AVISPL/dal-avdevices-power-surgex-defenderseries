@@ -14,7 +14,7 @@ public enum OutletProperty implements BaseProperty {
 	NAME("Name"),
 	STATUS("Status"),
 	INITIAL_STATE("InitialState"),
-	TOGGLE(Constant.TOGGLE),
+	POWER(Constant.POWER),
 	REBOOT_DELAY("RebootDelay(s)"),
 	REBOOT(Constant.REBOOT);
 
