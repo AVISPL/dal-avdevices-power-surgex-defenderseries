@@ -60,6 +60,8 @@ public class Constant {
 	public static final String NETWORK_STATUS_NULL_WARNING = "The network status object is null, returning empty map.";
 	public static final String HISTORICAL_PROPS_EMPTY_WARNING = "The historical properties is empty, returning empty map.";
 	public static final String STATISTICS_EMPTY_WARNING = "The statistics is empty, returning empty map.";
+	public static final String UNSUPPORTED_MAP_PROPERTY_WARNING = "Unsupported %s with property %s";
+	public static final String UNSUPPORTED_ACTION_WARNING = "The control endpoint can't be fetched using the action: ";
 
 	//	Fail messages
 	public static final String READ_PROPERTIES_FILE_FAILED = "Failed to load properties file: ";
@@ -68,7 +70,9 @@ public class Constant {
 	public static final String DEFINE_OUTLET_GROUP_INDEX_FAILED = "Invalid component index for Outlet groups: ";
 	public static final String CONTROL_PROPERTY_FAILED = "Failed to control property: ";
 	public static final String LOGIN_FAILED = "Failed to login, please check the username and password";
-	public static final String SET_UP_DATA_FAILED = "Failed to set up data for ";
+	public static final String SET_UP_DATA_FAILED_1 = "Failed to set up data for ";
+	public static final String SET_UP_DATA_FAILED_2 = "Failed to set up data for some reasons, returning the empty list";
+	public static final String SET_UP_DATA_FAILED_3 = "Failed to set up data for some reasons, returning the false value";
 	public static final String RESPONSE_CONTROL_FAILED = "Response to control operation failed (API returned false). URI: %s";
 	public static final String ACTION_PERFORM_FAILED = "Failed to perform data for action: ";
 	public static final String MAP_12_DATE_TIME_FAILED = "Failed to mapTo12hDatetime with timestamp: %s timezone: %s";

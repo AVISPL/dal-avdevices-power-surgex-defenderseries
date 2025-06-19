@@ -168,6 +168,7 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 		this.reentrantLock.lock();
 		try {
 			if (!this.isDataSetup()) {
+				this.logger.error(Constant.SET_UP_DATA_FAILED_2);
 				return Collections.emptyList();
 			}
 			Map<String, String> statistics = new HashMap<>(this.getGeneralProperties());
@@ -204,7 +205,6 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 			String groupName = groupInfo[0];
 			String action = propertyInfo[1];
 			int componentIndex = Integer.parseInt(groupInfo[groupInfo.length - 1]) - 1;
-			this.logger.info(String.format("Start control to %s", controllableProperty.getProperty()));
 			switch (groupName) {
 				case Constant.OUTLET_GROUP: {
 					if (componentIndex < 0 || componentIndex >= this.outlets.size()) {
@@ -232,7 +232,6 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 					this.logger.warn(Constant.CONTROL_PROPERTY_FAILED + controllableProperty.getProperty());
 			}
 		} finally {
-			this.logger.info("End control " + controllableProperty.getProperty());
 			this.reentrantLock.unlock();
 		}
 	}
@@ -316,7 +315,7 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 		} catch (FailedLoginException e) {
 			throw e;
 		} catch (Exception e) {
-			this.logger.error(e.getMessage(), e);
+			this.logger.error(Constant.SET_UP_DATA_FAILED_3, e);
 			return false;
 		}
 	}
@@ -601,7 +600,7 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 			throw new FailedLoginException(Constant.LOGIN_FAILED);
 		} catch (Exception e) {
 			this.logger.error(String.format(Constant.FETCH_DATA_FAILED, endpoint, responseClass.getSimpleName()), e);
-			throw new ResourceNotReachableException(Constant.SET_UP_DATA_FAILED + responseClass.getSimpleName());
+			throw new ResourceNotReachableException(Constant.SET_UP_DATA_FAILED_1 + responseClass.getSimpleName());
 		}
 	}
 

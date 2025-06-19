@@ -78,6 +78,7 @@ public class Util {
 			case VOLTAGE_LEVEL_STATUS:
 				return mapToValue(getMeasurements(currentStatus.getDevices()).isVoltageInLimit(), Constant.OK, Constant.ALERT);
 			default:
+				LOGGER.warn(String.format(Constant.UNSUPPORTED_MAP_PROPERTY_WARNING, "mapToGeneralProperty", property));
 				return null;
 		}
 	}
@@ -102,6 +103,7 @@ public class Util {
 			case ADAPTER_VERSION:
 				return mapToValue(adapterVersion);
 			default:
+				LOGGER.warn(String.format(Constant.UNSUPPORTED_MAP_PROPERTY_WARNING, "mapToAdapterMetadataProperty", property));
 				return null;
 		}
 	}
@@ -130,6 +132,7 @@ public class Util {
 			case HOST_NAME:
 				return mapToValue(networkSetting.getHostname());
 			default:
+				LOGGER.warn(String.format(Constant.UNSUPPORTED_MAP_PROPERTY_WARNING, "mapToNetworkSettingProperty", property));
 				return null;
 		}
 	}
@@ -170,6 +173,7 @@ public class Util {
 						|| InitialState.NOT_REBOOT_STATES.contains(InitialState.getByValue(outlet.getInitialState()));
 				return isRebootReadonly ? Constant.REBOOT : Constant.NOT_AVAILABLE;
 			default:
+				LOGGER.warn(String.format(Constant.UNSUPPORTED_MAP_PROPERTY_WARNING, "mapToOutletProperty", property));
 				return null;
 		}
 	}
@@ -196,6 +200,7 @@ public class Util {
 			case REBOOT:
 				return isRebootingComponent(group.getState()) ? Constant.REBOOT : Constant.NOT_AVAILABLE;
 			default:
+				LOGGER.warn(String.format(Constant.UNSUPPORTED_MAP_PROPERTY_WARNING, "mapToOutletGroupProperty", property));
 				return null;
 		}
 	}
@@ -240,6 +245,7 @@ public class Util {
 		if (action.equals(Constant.REBOOT)) {
 			return EndpointConstant.REBOOT;
 		}
+		LOGGER.warn(Constant.UNSUPPORTED_ACTION_WARNING + action);
 		return null;
 	}
 
@@ -375,6 +381,7 @@ public class Util {
 			case 2:
 				return Constant.REBOOTING;
 			default:
+				LOGGER.warn(String.format(Constant.UNSUPPORTED_MAP_PROPERTY_WARNING, "mapToStatus", state));
 				return null;
 		}
 	}
