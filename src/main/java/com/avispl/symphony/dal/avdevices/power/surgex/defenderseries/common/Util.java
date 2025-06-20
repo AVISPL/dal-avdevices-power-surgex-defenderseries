@@ -169,9 +169,12 @@ public class Util {
 				}
 				return toggleValue;
 			case REBOOT:
-				boolean isRebootReadonly = isRebootingComponent(outlet.getState())
-						|| InitialState.NOT_REBOOT_STATES.contains(InitialState.getByValue(outlet.getInitialState()));
-				return isRebootReadonly ? Constant.REBOOT : Constant.NOT_AVAILABLE;
+				if (isRebootingComponent(outlet.getState())) {
+					return Constant.IN_PROGRESS;
+				}
+				return InitialState.NOT_REBOOT_STATES.contains(InitialState.getByValue(outlet.getInitialState()))
+						? Constant.REBOOT
+						: Constant.NOT_AVAILABLE;
 			default:
 				LOGGER.warn(String.format(Constant.UNSUPPORTED_MAP_PROPERTY_WARNING, "mapToOutletProperty", property));
 				return null;
@@ -198,7 +201,7 @@ public class Util {
 			case POWER:
 				return isRebootingComponent(group.getState()) ? Constant.OFF : mapToToggle(group.getState());
 			case REBOOT:
-				return isRebootingComponent(group.getState()) ? Constant.REBOOT : Constant.NOT_AVAILABLE;
+				return isRebootingComponent(group.getState()) ? Constant.IN_PROGRESS : Constant.NOT_AVAILABLE;
 			default:
 				LOGGER.warn(String.format(Constant.UNSUPPORTED_MAP_PROPERTY_WARNING, "mapToOutletGroupProperty", property));
 				return null;

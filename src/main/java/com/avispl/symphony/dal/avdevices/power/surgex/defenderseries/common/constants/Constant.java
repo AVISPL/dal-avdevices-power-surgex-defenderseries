@@ -16,8 +16,6 @@ public class Constant {
 	public static final String DATETIME_12H_FORMAT = "MM/dd/yyyy, hh:mm:ss a";
 	public static final String GROUP_FORMAT = "%s_%02d";
 	public static final String PROPERTY_FORMAT = "%s#%s";
-	public static final String DATE_TIME_PATTERN = "yyyy-MM-dd HH:mm";
-	public static final String UTC_PATTERN = "yyyy-MM-dd'T'HH:mm:ssX";
 
 	//	Special characters
 	public static final String COMMA = ",";
@@ -38,6 +36,7 @@ public class Constant {
 	public static final String ON = "On";
 	public static final String OFF = "Off";
 	public static final String REBOOT = "Reboot";
+	public static final String IN_PROGRESS = "In Progress";
 	public static final String REBOOTING = "Rebooting";
 	public static final String POWER = "Power";
 	public static final String OK = "OK";
