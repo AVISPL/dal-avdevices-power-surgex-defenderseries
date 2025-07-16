@@ -100,6 +100,8 @@ public class Util {
 				return mapToValue(adapterBuildDate);
 			case ADAPTER_UPTIME:
 				return mapToUptime(adapterUptime);
+			case ADAPTER_UPTIME_MIN:
+				return mapToUptimeMin(adapterUptime);
 			case ADAPTER_VERSION:
 				return mapToValue(adapterVersion);
 			default:
@@ -426,6 +428,32 @@ public class Util {
 			return rs.toString().trim();
 		} catch (Exception e) {
 			LOGGER.error(Constant.MAP_TO_UPTIME_FAILED + uptime, e);
+			return Constant.NOT_AVAILABLE;
+		}
+	}
+
+	/**
+	 * Returns the elapsed uptime in **whole minutes** between the current system time and the given timestamp in milliseconds.
+	 * <p>
+	 * The input timestamp represents the start time in milliseconds (typically from {@link System#currentTimeMillis()}).
+	 * The returned string is the total number of minutes that have elapsed, excluding seconds.
+	 *
+	 * @param uptime the start time in milliseconds as a string (e.g., "1717581000000")
+	 * @return a string representing the total number of elapsed minutes (e.g., "125"),
+	 *         or {@link Constant#NOT_AVAILABLE} if parsing fails
+	 */
+	private static String mapToUptimeMin(String uptime) {
+		try {
+			if (StringUtils.isNullOrEmpty(uptime)) {
+				return Constant.NOT_AVAILABLE;
+			}
+
+			long uptimeSecond = (System.currentTimeMillis() - Long.parseLong(uptime)) / 1000;
+			long minutes = uptimeSecond / 60;
+
+			return String.valueOf(minutes);
+		} catch (Exception e) {
+			LOGGER.error(Constant.MAP_TO_UPTIME_MIN_FAILED + uptime, e);
 			return Constant.NOT_AVAILABLE;
 		}
 	}
