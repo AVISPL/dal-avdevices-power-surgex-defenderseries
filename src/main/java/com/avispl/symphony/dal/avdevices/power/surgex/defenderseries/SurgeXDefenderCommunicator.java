@@ -32,10 +32,12 @@ import com.avispl.symphony.api.dal.dto.monitor.Statistics;
 import com.avispl.symphony.api.dal.error.ResourceNotReachableException;
 import com.avispl.symphony.api.dal.monitor.Monitorable;
 import com.avispl.symphony.dal.avdevices.power.surgex.defenderseries.bases.BaseProperty;
+import com.avispl.symphony.dal.avdevices.power.surgex.defenderseries.common.RequestStateHandler;
 import com.avispl.symphony.dal.avdevices.power.surgex.defenderseries.common.Util;
 import com.avispl.symphony.dal.avdevices.power.surgex.defenderseries.common.constants.Constant;
 import com.avispl.symphony.dal.avdevices.power.surgex.defenderseries.common.constants.EndpointConstant;
 import com.avispl.symphony.dal.avdevices.power.surgex.defenderseries.models.CurrentStatus;
+import com.avispl.symphony.dal.avdevices.power.surgex.defenderseries.models.Device;
 import com.avispl.symphony.dal.avdevices.power.surgex.defenderseries.models.Group;
 import com.avispl.symphony.dal.avdevices.power.surgex.defenderseries.models.NetworkSetting;
 import com.avispl.symphony.dal.avdevices.power.surgex.defenderseries.models.Ntp;
@@ -91,6 +93,10 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 	 */
 	private ExtendedStatistics localExtendedStatistics;
 	/**
+	 * Handles request state updates and error tracking.
+	 */
+	private RequestStateHandler requestStateHandler;
+	/**
 	 * Represents the current status of the adapter.
 	 */
 	private CurrentStatus currentStatus;
@@ -116,11 +122,10 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 		this.reentrantLock = new ReentrantLock();
 		this.versionProperties = new Properties();
 		this.adapterInitializationTimestamp = System.currentTimeMillis();
-		this.dummyControllableProperty = new AdvancedControllableProperty(null, null, new AdvancedControllableProperty.Button(), null);
+		this.dummyControllableProperty = new AdvancedControllableProperty(null, null, new Button(), null);
 
 		this.localExtendedStatistics = new ExtendedStatistics();
-		this.currentStatus = new CurrentStatus();
-		this.networkSetting = new NetworkSetting();
+		this.requestStateHandler = new RequestStateHandler();
 		this.outlets = new ArrayList<>();
 		this.groups = new ArrayList<>();
 
@@ -167,10 +172,8 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 	public List<Statistics> getMultipleStatistics() throws Exception {
 		this.reentrantLock.lock();
 		try {
-			if (!this.isDataSetup()) {
-				this.logger.error(Constant.SET_UP_DATA_FAILED_2);
-				return Collections.emptyList();
-			}
+			this.authenticate();
+			this.setupData();
 			Map<String, String> statistics = new HashMap<>(this.getGeneralProperties());
 			statistics.putAll(this.getAdapterMetadataProperties());
 			statistics.putAll(this.getNetworkSettingProperties());
@@ -261,12 +264,13 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 	@Override
 	protected void internalDestroy() {
 		this.logger.info(Constant.DESTROY_INTERNAL_INFO + this);
-		this.currentStatus = null;
-		this.networkSetting = null;
 		this.outlets = null;
 		this.groups = null;
-		this.localExtendedStatistics = null;
 		this.historicalProperties = null;
+		this.currentStatus = null;
+		this.networkSetting = null;
+		this.localExtendedStatistics = null;
+		this.requestStateHandler = null;
 		super.internalDestroy();
 	}
 
@@ -287,37 +291,31 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 	}
 
 	/**
-	 * Authenticates and attempts to fetch the device's current status and network settings.
-	 * Also extracts and sets the time zone info into the current status.
+	 * Initializes the device by authenticating and loading configuration data.
+	 * <p>
+	 * This method:
+	 * - Authenticates the device session.
+	 * - Fetches current status and network settings.
+	 * - Verifies API response state.
+	 * - Sets the time zone from network settings into current status.
+	 * - Initializes outlets and groups from the fetched status.
 	 *
-	 * @return {@code true} if data is successfully fetched and initialized; {@code false} otherwise.
 	 * @throws FailedLoginException if authentication fails.
 	 */
-	private boolean isDataSetup() throws FailedLoginException {
-		try {
-			this.authenticate();
-			this.currentStatus = this.fetchData(EndpointConstant.CURRENT_STATUS, CurrentStatus.class);
-			this.networkSetting = this.fetchData(EndpointConstant.NETWORK_SETTINGS, NetworkSetting.class);
-
-			this.currentStatus.setTimeZone(Optional.ofNullable(this.networkSetting)
-					.map(NetworkSetting::getNtp).map(Ntp::getTimeZoneInfo).map(TimeZoneInfo::getName)
-					.orElse(null));
-			this.outlets = Optional.ofNullable(currentStatus)
-					.map(CurrentStatus::getDevices).filter(devices -> !devices.isEmpty())
-					.map(devices -> devices.get(0).getOutlets()).filter(outletList -> !outletList.isEmpty())
-					.orElse(new ArrayList<>());
-			this.groups = Optional.ofNullable(currentStatus)
-					.map(CurrentStatus::getDevices).filter(devices -> !devices.isEmpty())
-					.map(devices -> devices.get(0).getGroups()).filter(groupList -> !groupList.isEmpty())
-					.orElse(new ArrayList<>());
-
-			return true;
-		} catch (FailedLoginException e) {
-			throw e;
-		} catch (Exception e) {
-			this.logger.error(Constant.SET_UP_DATA_FAILED_3, e);
-			return false;
+	private void setupData() throws FailedLoginException {
+		this.currentStatus = this.fetchData(EndpointConstant.CURRENT_STATUS, CurrentStatus.class);
+		this.networkSetting = this.fetchData(EndpointConstant.NETWORK_SETTINGS, NetworkSetting.class);
+		this.requestStateHandler.verifyAPIState();
+		if (this.currentStatus == null) {
+			return;
 		}
+
+		this.currentStatus.setTimeZone(Optional.ofNullable(this.networkSetting)
+				.map(NetworkSetting::getNtp).map(Ntp::getTimeZoneInfo)
+				.orElse(new TimeZoneInfo()).getName());
+		Device firstDevice = Optional.ofNullable(currentStatus.getDevices()).map(devices -> devices.get(0)).orElse(new Device());
+		this.outlets = Optional.ofNullable(firstDevice.getOutlets()).orElseGet(ArrayList::new);
+		this.groups = Optional.ofNullable(firstDevice.getGroups()).orElseGet(ArrayList::new);
 	}
 
 	/**
@@ -523,15 +521,15 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 	 * Generates a map of property names and their corresponding values.
 	 * <p>
 	 * Each property name can be optionally prefixed with a group name using a predefined format.
-	 * The values are derived using the provided mapping function, with {@link Constant#NONE} as a fallback for null results.
+	 * The values are derived using the provided mapping function, with {@link Constant#NOT_AVAILABLE} as a fallback for null results.
 	 * </p>
 	 *
 	 * @param <T>        the enum type that extends {@link BaseProperty}
 	 * @param properties the array of enum constants to be processed; if null, an empty map is returned
 	 * @param groupName  optional group name used to prefix each property's name; can be null
 	 * @param mapper     a function that maps each property to its corresponding string value;
-	 *                   if null or if the result is null, {@link Constant#NONE} is used as the value
-	 * @return a map where keys are (optionally grouped) property names and values are mapped strings or {@link Constant#NONE}
+	 *                   if null or if the result is null, {@link Constant#NOT_AVAILABLE} is used as the value
+	 * @return a map where keys are (optionally grouped) property names and values are mapped strings or {@link Constant#NOT_AVAILABLE}
 	 */
 	private <T extends Enum<T> & BaseProperty> Map<String, String> generateProperties(T[] properties, String groupName, Function<T, String> mapper) {
 		if (properties == null || mapper == null) {
@@ -539,7 +537,7 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 		}
 		return Arrays.stream(properties).collect(Collectors.toMap(
 				property -> Objects.isNull(groupName) ? property.getName() : String.format(Constant.PROPERTY_FORMAT, groupName, property.getName()),
-				property -> Optional.ofNullable(mapper.apply(property)).orElse(Constant.NONE)
+				property -> Optional.ofNullable(mapper.apply(property)).orElse(Constant.NOT_AVAILABLE)
 		));
 	}
 
@@ -579,14 +577,16 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 	}
 
 	/**
-	 * Fetches data from a given endpoint using a GET request and maps the response to the specified class type.
+	 * Fetches data from the specified endpoint using a GET request and maps the response to the given class type.
+	 * Handles authentication failure and network-related errors appropriately.
 	 *
-	 * @param <T> The type of the expected response.
-	 * @param endpoint The API endpoint to send the GET request to.
+	 * @param <T>           The expected response type.
+	 * @param endpoint      The API endpoint to call.
 	 * @param responseClass The class type to map the response to.
-	 * @return The response mapped to the specified type {@code T}.
-	 * @throws FailedLoginException If authorization fails (e.g., invalid username or password).
-	 * @throws ResourceNotReachableException If any other error occurs while fetching the data.
+	 * @return The response mapped to type {@code T}, or {@code null} if the response is empty or an error occurs.
+	 *
+	 * @throws FailedLoginException           if authentication fails.
+	 * @throws ResourceNotReachableException  if a network error or resource access issue occurs.
 	 */
 	private <T> T fetchData(String endpoint, Class<T> responseClass) throws FailedLoginException {
 		try {
@@ -594,13 +594,17 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 			if (Objects.isNull(response)) {
 				this.logger.warn(String.format(Constant.FETCHED_DATA_NULL_WARNING, endpoint, responseClass.getSimpleName()));
 			}
+			this.requestStateHandler.resolveError(responseClass.getSimpleName());
 
 			return response;
 		} catch (FailedLoginException e) {
 			throw new FailedLoginException(Constant.LOGIN_FAILED);
+		} catch (ResourceNotReachableException e) {
+			throw new ResourceNotReachableException(e.getMessage(), e);
 		} catch (Exception e) {
+			this.requestStateHandler.pushError(responseClass.getSimpleName(), e);
 			this.logger.error(String.format(Constant.FETCH_DATA_FAILED, endpoint, responseClass.getSimpleName()), e);
-			throw new ResourceNotReachableException(Constant.SET_UP_DATA_FAILED_1 + responseClass.getSimpleName());
+			return null;
 		}
 	}
 
@@ -620,7 +624,7 @@ public class SurgeXDefenderCommunicator extends RestCommunicator implements Moni
 			}
 		} catch (Exception e) {
 			String[] parts = uri.split(Constant.SLASH);
-			this.logger.error(String.format("Exception occurred during control operation. Endpoint: %s, ComponentID: %s", uri, componentID), e);
+			this.logger.error(String.format(Constant.CONTROL_OPERATION_FAILED, uri, componentID), e);
 			throw new NotImplementedException(Constant.ACTION_PERFORM_FAILED + parts[parts.length - 1]);
 		}
 	}

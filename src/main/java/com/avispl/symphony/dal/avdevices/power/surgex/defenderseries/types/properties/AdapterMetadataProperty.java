@@ -11,6 +11,7 @@ import com.avispl.symphony.dal.avdevices.power.surgex.defenderseries.bases.BaseP
 public enum AdapterMetadataProperty implements BaseProperty {
 	ADAPTER_BUILD_DATE("AdapterBuildDate"),
 	ADAPTER_UPTIME("AdapterUptime"),
+	ADAPTER_UPTIME_MIN("AdapterUptime(min)"),
 	ADAPTER_VERSION("AdapterVersion");
 
 	private final String name;

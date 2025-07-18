@@ -86,20 +86,22 @@ public class Util {
 	/**
 	 * Maps the given {@link AdapterMetadataProperty} to its value using the provided properties.
 	 *
-	 * @param applicationProperties the source of property values
+	 * @param versionProperties the source of property values
 	 * @param property the property to map
-	 * @return the formatted value, or {@code Constant.NONE} if not available
+	 * @return the formatted value, or {@code Constant.NOT_AVAILABLE} if not available
 	 */
-	public static String mapToAdapterMetadataProperty(Properties applicationProperties, AdapterMetadataProperty property) {
-		String adapterBuildDate = applicationProperties.getProperty("adapter.build.date");
-		String adapterUptime = applicationProperties.getProperty("adapter.uptime");
-		String adapterVersion = applicationProperties.getProperty("adapter.version");
+	public static String mapToAdapterMetadataProperty(Properties versionProperties, AdapterMetadataProperty property) {
+		String adapterBuildDate = versionProperties.getProperty("adapter.build.date");
+		String adapterUptime = versionProperties.getProperty("adapter.uptime");
+		String adapterVersion = versionProperties.getProperty("adapter.version");
 
 		switch (property) {
 			case ADAPTER_BUILD_DATE:
 				return mapToValue(adapterBuildDate);
 			case ADAPTER_UPTIME:
 				return mapToUptime(adapterUptime);
+			case ADAPTER_UPTIME_MIN:
+				return mapToUptimeMin(adapterUptime);
 			case ADAPTER_VERSION:
 				return mapToValue(adapterVersion);
 			default:
@@ -398,12 +400,12 @@ public class Util {
 	 *
 	 * @param uptime the start time in milliseconds as a string (e.g., "1717581000000")
 	 * @return a formatted duration string like "2 day(s) 3 hour(s) 15 minute(s) 42 second(s)",
-	 *         or {@link Constant#NONE} if parsing fails
+	 *         or {@link Constant#NOT_AVAILABLE} if parsing fails
 	 */
 	private static String mapToUptime(String uptime) {
 		try {
 			if (StringUtils.isNullOrEmpty(uptime)) {
-				return Constant.NONE;
+				return Constant.NOT_AVAILABLE;
 			}
 
 			long uptimeSecond = (System.currentTimeMillis() - Long.parseLong(uptime)) / 1000;
@@ -425,8 +427,34 @@ public class Util {
 
 			return rs.toString().trim();
 		} catch (Exception e) {
-			LOGGER.error(Constant.MAP_ELAPSED_TIME_FAILED + uptime, e);
-			return Constant.NONE;
+			LOGGER.error(Constant.MAP_TO_UPTIME_FAILED + uptime, e);
+			return Constant.NOT_AVAILABLE;
+		}
+	}
+
+	/**
+	 * Returns the elapsed uptime in **whole minutes** between the current system time and the given timestamp in milliseconds.
+	 * <p>
+	 * The input timestamp represents the start time in milliseconds (typically from {@link System#currentTimeMillis()}).
+	 * The returned string is the total number of minutes that have elapsed, excluding seconds.
+	 *
+	 * @param uptime the start time in milliseconds as a string (e.g., "1717581000000")
+	 * @return a string representing the total number of elapsed minutes (e.g., "125"),
+	 *         or {@link Constant#NOT_AVAILABLE} if parsing fails
+	 */
+	private static String mapToUptimeMin(String uptime) {
+		try {
+			if (StringUtils.isNullOrEmpty(uptime)) {
+				return Constant.NOT_AVAILABLE;
+			}
+
+			long uptimeSecond = (System.currentTimeMillis() - Long.parseLong(uptime)) / 1000;
+			long minutes = uptimeSecond / 60;
+
+			return String.valueOf(minutes);
+		} catch (Exception e) {
+			LOGGER.error(Constant.MAP_TO_UPTIME_MIN_FAILED + uptime, e);
+			return Constant.NOT_AVAILABLE;
 		}
 	}
 }

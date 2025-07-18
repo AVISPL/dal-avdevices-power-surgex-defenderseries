@@ -69,11 +69,11 @@ public class Constant {
 	public static final String DEFINE_OUTLET_GROUP_INDEX_FAILED = "Invalid component index for Outlet groups: ";
 	public static final String CONTROL_PROPERTY_FAILED = "Failed to control property: ";
 	public static final String LOGIN_FAILED = "Failed to login, please check the username and password";
-	public static final String SET_UP_DATA_FAILED_1 = "Failed to set up data for ";
-	public static final String SET_UP_DATA_FAILED_2 = "Failed to set up data for some reasons, returning the empty list";
-	public static final String SET_UP_DATA_FAILED_3 = "Failed to set up data for some reasons, returning the false value";
 	public static final String RESPONSE_CONTROL_FAILED = "Response to control operation failed (API returned false). URI: %s";
 	public static final String ACTION_PERFORM_FAILED = "Failed to perform data for action: ";
 	public static final String MAP_12_DATE_TIME_FAILED = "Failed to mapTo12hDatetime with timestamp: %s timezone: %s";
-	public static final String MAP_ELAPSED_TIME_FAILED = "Failed to mapToElapsedTime with uptime: ";
+	public static final String MAP_TO_UPTIME_FAILED = "Failed to mapToUptime with uptime: ";
+	public static final String MAP_TO_UPTIME_MIN_FAILED = "Failed to mapToUptimeMin with uptime: ";
+	public static final String REQUEST_APIS_FAILED = "Unable to process requested API sections: [%s], error reported: [%s]";
+	public static final String CONTROL_OPERATION_FAILED = "Exception occurred during control operation. Endpoint: %s, ComponentID: %s";
 }
